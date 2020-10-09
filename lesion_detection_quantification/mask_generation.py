@@ -7,6 +7,7 @@ import nibabel as nib
 import matplotlib.pyplot as plt
 
 import helpers as hp
+from mask_quantification import dice_coef
 
 def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_folder, mni_ref):
     """
@@ -48,10 +49,12 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
     mni_omats = []
     masks = []
     used_names = []
-    print('Preprocessing for BIANCA (skullstripping and registration)')
+    training_folder = os.path.join(bin_folder, 'training')
+    os.mkdir(training_folder)
+    print('Preprocessing training data for BIANCA (skullstripping and registration)')
     for i, (name, flair, t1, mask) in enumerate(zip(train_names, train_flairs, train_t1s, train_masks)):
         print(f'{name} ({i+1} of {len(train_names)})')
-        pt_folder = os.path.join(bin_folder, name)
+        pt_folder = os.path.join(training_folder, name)
         os.mkdir(pt_folder)
         # first step is to skullstrip the scans and register the t1s to flair space
         stripped_flair = os.path.join(pt_folder, 'stripped_flair.nii.gz')
@@ -73,10 +76,10 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
         masks.append(mask)
         
         used_names.append(name)
-        
-        #if i >= 2: # for speeding up prototyping
-            #break
-        
+        """        
+        if i >= 2: # for speeding up prototyping
+            break
+        """
     bianca_master_name = os.path.join(bin_folder, 'bianca_master.txt')
     hp.generate_bianca_master(bianca_master_name, stripped_flairs, stripped_and_registered_t1s, masks, mni_omats)
     model_name = os.path.join(bin_folder, 'bianca_model')
@@ -95,7 +98,6 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
         print(f'{name} ({i+1} of {len(used_names)})')
         prob_mask_name = os.path.join(training_mask_folder, f'{name}_probmask.nii.gz')
         mini_master = hp.generate_mini_master(training_mask_folder, flair, t1, omat)
-        
         hp.execute_bianca(mini_master, classifier_name, 1, 1, 3, prob_mask_name)
         prob_mask_names.append(prob_mask_name)
     
@@ -112,14 +114,14 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
         for thresh in thresholds:
             print(thresh)
             bin_mask = prob_mask >= thresh
-            dice = hp.dice_coef(bin_mask, true_mask)
+            dice = dice_coef(bin_mask, true_mask)
             dices_for_this_pt.append(dice)
         dices.append(np.array(dices_for_this_pt))
     dices = np.array(dices)
     means = dices.mean(0)
     amax = np.argmax(means)
     winning_thresh = thresholds[amax]
-    print(f'Optimal threshold is {winning_thresh}')
+    print(f'\nOptimal threshold is {round(winning_thresh,2)}\n')
     
     plt.figure()
     for row in dices:
@@ -128,13 +130,66 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
     plt.xlabel('Threshold')
     plt.ylabel('Dice coefficient')
     plt.xlim(0,1)
-    plt.title(f'Effect of threshold on cohort lesion mask quality\nOptimal threshold: {winning_thresh}')
+    plt.title(f'Effect of threshold on cohort lesion mask quality\nOptimal threshold: {round(winning_thresh,2)}')
     
     figname = os.path.join(bin_folder, 'thresh_plot.png')
     plt.savefig(figname)    
         
-    # step 3: using the model and the masking threshold from step 2, generate masks for the evaluation set
-
+    # step 3: preprocess evaluation data
+    stripped_flairs_eval = []
+    stripped_and_registered_t1s_eval = []
+    mni_omats_eval = []
+    used_names_eval = []
+    eval_folder = os.path.join(bin_folder, 'eval')
+    os.mkdir(eval_folder)
+    print('Preprocessing evaluation scans')
+    for i, (name, flair, t1) in enumerate(zip(eval_names, eval_flairs, eval_t1s)):
+        print(f'{name} ({i+1} of {len(eval_names)})')
+        pt_folder_eval = os.path.join(eval_folder, name)
+        os.mkdir(pt_folder_eval)
+        # first step is to skullstrip the scans and register the t1s to flair space
+        stripped_flair_eval = os.path.join(pt_folder_eval, 'stripped_flair.nii.gz')
+        hp.skullstrip(flair, stripped_flair_eval)
+        
+        stripped_t1_eval = os.path.join(pt_folder_eval, 'stripped_t1.nii.gz')
+        hp.skullstrip(t1, stripped_t1_eval)
+        
+        stripped_and_registered_t1_eval = os.path.join(pt_folder_eval, 'stripped_and_registered_t1.nii.gz')
+        hp.register_scan(stripped_flair_eval, stripped_t1_eval, stripped_and_registered_t1_eval)
+        
+        omat_eval = os.path.join(pt_folder_eval, 'to_mni_omat.mat')
+        stripped_flair_mni_eval = os.path.join(pt_folder_eval, 'stripped_flair_mni.nii.gz')
+        hp.generate_omat(mni_ref, stripped_flair_eval, stripped_flair_mni_eval, omat_eval)
+        
+        stripped_flairs_eval.append(stripped_flair_eval)
+        stripped_and_registered_t1s_eval.append(stripped_and_registered_t1_eval)
+        mni_omats_eval.append(omat_eval)
+        
+        used_names_eval.append(name)
+        """        
+        if i >= 4: # for speeding up prototyping
+            break
+        """
+    # step 4: using the model and the masking threshold from step 2, generate masks for the evaluation set
+    print('Generating and thresholding evaluation masks')
+    eval_mask_folder = os.path.join(bin_folder, 'eval_masks')
+    os.mkdir(eval_mask_folder)
+    for i, (name, flair, t1) in enumerate(zip(used_names_eval, stripped_flairs_eval, stripped_and_registered_t1s_eval)):
+        print(f'\n{name} ({i+1} of {len(used_names_eval)})')
+        eval_mask_name = os.path.join(eval_mask_folder, f'{name}_probmask.nii.gz')
+        mini_master = hp.generate_mini_master(eval_mask_folder, flair, t1, omat)
+        print('Generating probability mask')
+        hp.execute_bianca(mini_master, classifier_name, 1, 1, 3, eval_mask_name)
+        print('Thresholding mask')
+        pmask = nib.load(eval_mask_name)
+        fdata = pmask.get_fdata()
+        
+        bin_mask = (fdata >= winning_thresh).astype(int)
+        bin_mask_name = os.path.join(write_folder, f'{name}.nii.gz')
+        
+        out = nib.Nifti1Image(bin_mask, pmask.affine, pmask.header)
+        nib.save(out, bin_mask_name)
+        
 
 def generate_knntpp_masks():
     pass

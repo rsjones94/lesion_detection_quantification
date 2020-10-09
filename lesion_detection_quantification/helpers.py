@@ -3,17 +3,6 @@ import os
 import numpy as np
 
 
-def dice_coef(y_true, y_pred):
-    """
-    Courtesy Zabir Al Nazi on StackOverflow
-    """
-    y_true_f = y_true.flatten()
-    y_pred_f = y_pred.flatten()
-    intersection = np.sum(y_true_f * y_pred_f)
-    smooth = 0.0001
-    return (2. * intersection + smooth) / (np.sum(y_true_f) + np.sum(y_pred_f) + smooth)
-
-
 def chunk(xs, n):
     ys = list(xs)
     np.random.shuffle(ys)
