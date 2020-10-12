@@ -5,9 +5,9 @@ from glob import glob
 import numpy as np
 import nibabel as nib
 import matplotlib.pyplot as plt
+from sklearn import metrics
 
 import helpers as hp
-from mask_quantification import dice_coef
 
 def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_folder, mni_ref):
     """
@@ -110,11 +110,15 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
         print(f'Comparison:\n{p}\nvs.\n{t}')
         prob_mask = nib.load(p).get_fdata()
         true_mask = nib.load(t).get_fdata()
+        
+        y_true_f = true_mask.flatten()
+        
         dices_for_this_pt = []
         for thresh in thresholds:
-            print(thresh)
+            print(round(thresh,2))
             bin_mask = prob_mask >= thresh
-            dice = dice_coef(bin_mask, true_mask)
+            y_pred_f = bin_mask.flatten()
+            dice = metrics.f1_score(y_true_f, y_pred_f)
             dices_for_this_pt.append(dice)
         dices.append(np.array(dices_for_this_pt))
     dices = np.array(dices)
@@ -199,8 +203,38 @@ def generate_default_lga_masks():
     pass
 
 
-def generate_default_lpa_masks():
-    pass
+def generate_default_lpa_masks(evaluation_data, write_folder, bin_folder):
+    """
+    
+
+    Parameters
+    ----------
+    evaluation_data : list of lists of filepaths. [names, flairs, t1s]
+        the data for which masks will be generated. note that t1s are not actually recorded
+        and can be a dummy variable
+    write_folder : filepath
+        folder that evaluation masks will be written to
+    bin_folder : filepath
+        folder that helper files will be written to.
+
+    Returns
+    -------
+    None.
+
+    """
+    
+    eval_names, eval_flairs, eval_t1s = evaluation_data
+    
+    
+    if os.path.exists(bin_folder):
+        shutil.rmtree(bin_folder)
+    os.mkdir(bin_folder)
+    
+    if os.path.exists(write_folder):
+        shutil.rmtree(write_folder)
+    os.mkdir(write_folder)
+    
+    raise NotImplementedError
     
     
 def generate_custom_lga_masks():
@@ -210,3 +244,10 @@ def generate_custom_lga_masks():
 def generate_custom_lpa_masks():
     pass
     
+
+
+
+
+
+
+

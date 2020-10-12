@@ -6,16 +6,6 @@ from scipy import spatial
 from sklearn.neighbors import DistanceMetric
 
 
-def dice_coef(y_true, y_pred):
-    """
-    Courtesy Zabir Al Nazi on StackOverflow
-    """
-    y_true_f = y_true.flatten()
-    y_pred_f = y_pred.flatten()
-    intersection = np.sum(y_true_f * y_pred_f)
-    smooth = 0.0001
-    return (2. * intersection + smooth) / (np.sum(y_true_f) + np.sum(y_pred_f) + smooth)
-
 
 def volumetric_similarity(y_true, y_pred):
     
@@ -49,7 +39,7 @@ def quantify_mask_quality(y_true, y_pred):
     y_true_f = y_true.flatten()
     y_pred_f = y_pred.flatten()
     
-    f1 = metrics.f1_score(y_true_f, y_pred_f)
+    f1 = metrics.f1_score(y_true_f, y_pred_f) # f1 and dice coefficient are the same thing
     jac = metrics.jaccard_score(y_true_f, y_pred_f)
     
     tn, fp, fn, tp = (metrics.confusion_matrix(y_true_f, y_pred_f).ravel())

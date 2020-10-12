@@ -82,17 +82,24 @@ if generate_masks:
         os.mkdir(cohort_bin_folder)
         
         
+        """     
         bianca_write_folder = os.path.join(cohort_folder, 'bianca')
         bianca_bin_folder = os.path.join(cohort_bin_folder, 'bianca')
         print('Generating BIANCA masks')
         mg.generate_bianca_masks(training_data, evaluation_data, bianca_write_folder, bianca_bin_folder, mni_reference_scan)
+        """
         
-        # not implemented
-        mg.generate_knntpp_masks()
-        mg.generate_default_lga_masks()
-        mg.generate_default_lpa_masks()
-        mg.generate_custom_lga_masks()
-        mg.generate_custom_lpa_masks()
+        mg.generate_knntpp_masks() # not implemented
+        mg.generate_default_lga_masks() # not implemented
+        
+        bianca_write_folder = os.path.join(cohort_folder, 'lpa_standard')
+        bianca_bin_folder = os.path.join(cohort_bin_folder, 'lpa_standard')
+        print('Generating standard LPA masks')
+        mg.generate_default_lpa_masks(training_data, evaluation_data, bianca_write_folder, bianca_bin_folder) # not implemented
+        
+        
+        mg.generate_custom_lga_masks() # not implemented
+        mg.generate_custom_lpa_masks() # not implemented
     
     
 if evaluate_masks:
@@ -150,6 +157,8 @@ if evaluate_masks:
                 metrics_reference[protocol_name] = []
     
     average_folder = os.path.join(evaluation_folder, 'average')
+    if os.path.exists(average_folder):
+        shutil.rmtree(average_folder)
     os.mkdir(average_folder)
     for key, li in metrics_reference.items():
         protocol_df = pd.concat(li)
