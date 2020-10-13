@@ -12,6 +12,9 @@ import helpers as hp
 
 np.random.seed(0)
 
+
+
+
 """
 In order for this script to run correctly, you must:
     1) download FSL and make sure its executables are added to your PATH
@@ -26,7 +29,7 @@ data_folder = '/Users/skyjones/Documents/lesion_detection_quantification_data/'
 mni_reference_scan = '/usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz'
 
 generate_masks = True
-evaluate_masks = True
+evaluate_masks = False
 
 n_cohorts = 3 # from the data, n unique training sets will be created and evaluated independently
 
@@ -89,17 +92,17 @@ if generate_masks:
         mg.generate_bianca_masks(training_data, evaluation_data, bianca_write_folder, bianca_bin_folder, mni_reference_scan)
         """
         
-        mg.generate_knntpp_masks() # not implemented
-        mg.generate_default_lga_masks() # not implemented
+        # mg.generate_knntpp_masks() # not implemented
+        # mg.generate_default_lga_masks() # not implemented
         
-        bianca_write_folder = os.path.join(cohort_folder, 'lpa_standard')
-        bianca_bin_folder = os.path.join(cohort_bin_folder, 'lpa_standard')
+        standard_lpa_write_folder = os.path.join(cohort_folder, 'lpa_standard')
+        standard_lpa_bin_folder = os.path.join(cohort_bin_folder, 'lpa_standard')
         print('Generating standard LPA masks')
-        mg.generate_default_lpa_masks(training_data, evaluation_data, bianca_write_folder, bianca_bin_folder) # not implemented
+        mg.generate_lpa_masks(training_data, evaluation_data, standard_lpa_write_folder, standard_lpa_bin_folder, model_type='default')
         
         
-        mg.generate_custom_lga_masks() # not implemented
-        mg.generate_custom_lpa_masks() # not implemented
+        # mg.generate_custom_lga_masks() # not implemented
+        # mg.generate_custom_lpa_masks() # not implemented
     
     
 if evaluate_masks:

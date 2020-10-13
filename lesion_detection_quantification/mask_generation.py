@@ -1,6 +1,8 @@
 import os
 import shutil
 from glob import glob
+import gzip
+import subprocess
 
 import numpy as np
 import nibabel as nib
@@ -8,6 +10,15 @@ import matplotlib.pyplot as plt
 from sklearn import metrics
 
 import helpers as hp
+
+
+PROTOTYPING = False
+
+def gunzip_shutil(source_filepath, dest_filepath, block_size=65536):
+    with gzip.open(source_filepath, 'rb') as s_file, \
+            open(dest_filepath, 'wb') as d_file:
+        shutil.copyfileobj(s_file, d_file, block_size)
+
 
 def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_folder, mni_ref):
     """
@@ -30,6 +41,8 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
     None.
 
     """
+    if PROTOTYPING:
+        print(f'\n~~~~~~~~~~~~\nPrototyping is on. n={PROTOTYPING}\n~~~~~~~~~~~~\n')
     
     train_names, train_flairs, train_t1s, train_masks = training_data
     eval_names, eval_flairs, eval_t1s = evaluation_data
@@ -76,10 +89,11 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
         masks.append(mask)
         
         used_names.append(name)
-        """        
-        if i >= 2: # for speeding up prototyping
-            break
-        """
+           
+        if PROTOTYPING:
+            if i >= PROTOTYPING: # for speeding up prototyping
+                break
+        
     bianca_master_name = os.path.join(bin_folder, 'bianca_master.txt')
     hp.generate_bianca_master(bianca_master_name, stripped_flairs, stripped_and_registered_t1s, masks, mni_omats)
     model_name = os.path.join(bin_folder, 'bianca_model')
@@ -101,7 +115,8 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
         hp.execute_bianca(mini_master, classifier_name, 1, 1, 3, prob_mask_name)
         prob_mask_names.append(prob_mask_name)
     
-    thresholds = np.arange(0.02, 1.02, 0.02)
+    the_by = 0.05
+    thresholds = np.arange(the_by, 1+the_by, the_by)
     dices = []
     
     print('Determining optimal threshold')
@@ -170,10 +185,11 @@ def generate_bianca_masks(training_data, evaluation_data, write_folder, bin_fold
         mni_omats_eval.append(omat_eval)
         
         used_names_eval.append(name)
-        """        
-        if i >= 4: # for speeding up prototyping
-            break
-        """
+        
+        if PROTOTYPING:
+            if i >= PROTOTYPING: # for speeding up prototyping
+                break
+            
     # step 4: using the model and the masking threshold from step 2, generate masks for the evaluation set
     print('Generating and thresholding evaluation masks')
     eval_mask_folder = os.path.join(bin_folder, 'eval_masks')
@@ -199,23 +215,29 @@ def generate_knntpp_masks():
     pass
 
 
-def generate_default_lga_masks():
+def generate_lga_masks():
     pass
 
 
-def generate_default_lpa_masks(evaluation_data, write_folder, bin_folder):
+def generate_lpa_masks(training_data, evaluation_data, write_folder, bin_folder, model_type):
     """
     
 
     Parameters
     ----------
+    training_data : list of lists of filepaths
+        the data used to generate the training thresholds. [names, flairs, t1s, masks]
+        note that t1s are not actually needed
+        and can be a dummy variable
     evaluation_data : list of lists of filepaths. [names, flairs, t1s]
-        the data for which masks will be generated. note that t1s are not actually recorded
+        the data for which masks will be generated. note that t1s are not actually needed
         and can be a dummy variable
     write_folder : filepath
         folder that evaluation masks will be written to
     bin_folder : filepath
         folder that helper files will be written to.
+    model_type : str
+        'default' or 'custom'
 
     Returns
     -------
@@ -223,7 +245,18 @@ def generate_default_lpa_masks(evaluation_data, write_folder, bin_folder):
 
     """
     
+    if PROTOTYPING:
+        print(f'\n~~~~~~~~~~~~\nPrototyping is on. n={PROTOTYPING}\n~~~~~~~~~~~~\n')
+
+    
+    if model_type != 'default':
+        raise NotImplementedError
+    
+    train_names, train_flairs, train_t1s, train_masks = training_data
     eval_names, eval_flairs, eval_t1s = evaluation_data
+    
+    
+    matlab_alias = "/Applications/MATLAB_R2020b.app/bin/matlab -nodesktop -nosplash -nojvm"
     
     
     if os.path.exists(bin_folder):
@@ -234,17 +267,128 @@ def generate_default_lpa_masks(evaluation_data, write_folder, bin_folder):
         shutil.rmtree(write_folder)
     os.mkdir(write_folder)
     
-    raise NotImplementedError
+    # step 1: generate probability masks for the training set
+    
+    training_folder = os.path.join(bin_folder, 'training')
+    os.mkdir(training_folder)
+    print(f'Generating training masks for LPA ({model_type})')
+    unpacked_flairs = []
+    probability_masks = []
+    used_train_masks = []
+    for i, (name, flair, t1, mask) in enumerate(zip(train_names, train_flairs, train_t1s, train_masks)):
+        print(f'{name} ({i+1} of {len(train_names)})')
+        pt_folder = os.path.join(training_folder, name)
+        os.mkdir(pt_folder)
+        
+        # first step is unzip the FLAIR, move it to the pt_folder and then run LPA
+        """
+        f = gzip.open(flair, 'rb')
+        file_content = f.read()
+        f.close()
+        """
+        
+        unzipped_flair = flair[:-3]
+        unzipped_flair_base = os.path.basename(os.path.normpath(unzipped_flair))
+        unzipped_flair_target = os.path.join(pt_folder, unzipped_flair_base)
+        
+        gunzip_shutil(flair, unzipped_flair)
+        shutil.move(unzipped_flair, unzipped_flair_target)
+        
+        matlab_call = f"{matlab_alias} -nodisplay -r 'sky_ps_LST_lpa {unzipped_flair_target}'"
+        os.system(matlab_call) # need to use interactive version of zsh, not the older default sh
+        
+        unpacked_flairs.append(unzipped_flair_target)
+        
+        prob_mask = os.path.join(pt_folder, f'ples_lpa_m{unzipped_flair_base}')
+        probability_masks.append(prob_mask)
+        
+        used_train_masks.append(mask)
+        
+        if PROTOTYPING:
+            if i >= PROTOTYPING: # for speeding up prototyping
+                break
+        
+    
+
+    # step 2: using the model from step 1 and the training set, find the masking threshold that maximizes the average dice coefficient
+    # maybe you could get results with a heuristic search but we'll just do it exhaustively (with a predetermined list of possible values)
+    
+    the_by = 0.05
+    thresholds = np.arange(the_by, 1+the_by, the_by)
+    dices = []
+    
+    print('Determining optimal threshold')
+    for i, (p,t) in enumerate(zip(probability_masks, used_train_masks)):
+        print(f'\n{i+1} of {len(probability_masks)}')
+        print(f'Comparison:\n{p}\nvs.\n{t}')
+        prob_mask = nib.load(p).get_fdata()
+        true_mask = nib.load(t).get_fdata()
+        
+        y_true_f = true_mask.flatten()
+        
+        dices_for_this_pt = []
+        for thresh in thresholds:
+            print(round(thresh,2))
+            bin_mask = prob_mask >= thresh
+            y_pred_f = bin_mask.flatten()
+            dice = metrics.f1_score(y_true_f, y_pred_f)
+            dices_for_this_pt.append(dice)
+        dices.append(np.array(dices_for_this_pt))
+    dices = np.array(dices)
+    means = dices.mean(0)
+    amax = np.argmax(means)
+    winning_thresh = thresholds[amax]
+    print(f'\nOptimal threshold is {round(winning_thresh,2)}\n')
+    
+    plt.figure()
+    for row in dices:
+        plt.plot(thresholds, row, color='black', alpha=0.2)
+    plt.plot(thresholds, means, color='red')
+    plt.xlabel('Threshold')
+    plt.ylabel('Dice coefficient')
+    plt.xlim(0,1)
+    plt.title(f'Effect of threshold on cohort lesion mask quality\nOptimal threshold: {round(winning_thresh,2)}')
+    
+    figname = os.path.join(bin_folder, 'thresh_plot.png')
+    plt.savefig(figname)    
     
     
-def generate_custom_lga_masks():
-    pass
+    # step 3: using the model and the masking threshold from step 2, generate masks for the evaluation set
 
+    print('Generating and thresholding evaluation masks')
+    eval_folder = os.path.join(bin_folder, 'eval')
+    os.mkdir(eval_folder)
+    for i, (name, flair) in enumerate(zip(eval_names, eval_flairs)):
+        print(f'\n{name} ({i+1} of {len(eval_names)})')
 
-def generate_custom_lpa_masks():
-    pass
-    
+        pt_folder_eval = os.path.join(eval_folder, name)
+        os.mkdir(pt_folder_eval)
+        
+        unzipped_flair = flair[:-3]
+        unzipped_flair_base = os.path.basename(os.path.normpath(unzipped_flair))
+        unzipped_flair_target = os.path.join(pt_folder_eval, unzipped_flair_base)
+        
+        gunzip_shutil(flair, unzipped_flair)
+        shutil.move(unzipped_flair, unzipped_flair_target)
+        
+        matlab_call = f"{matlab_alias} -nodisplay -r 'sky_ps_LST_lpa {unzipped_flair_target}'"
+        os.system(matlab_call) # need to use interactive version of zsh, not the older default sh
+        
+        prob_mask = os.path.join(pt_folder_eval, f'ples_lpa_m{unzipped_flair_base}')
+        
+        print('Thresholding mask')
+        pmask = nib.load(prob_mask)
+        fdata = pmask.get_fdata()
+        
+        bin_mask = (fdata >= winning_thresh).astype(int)
+        bin_mask_name = os.path.join(write_folder, f'{name}.nii.gz')
+        
+        out = nib.Nifti1Image(bin_mask, pmask.affine, pmask.header)
+        nib.save(out, bin_mask_name)
 
+        if PROTOTYPING:
+            if i >= PROTOTYPING: # for speeding up prototyping
+                break
 
 
 
