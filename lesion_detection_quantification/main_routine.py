@@ -28,10 +28,10 @@ In order for this script to run correctly, you must:
 data_folder = '/Users/skyjones/Documents/lesion_detection_quantification_data/'
 mni_reference_scan = '/usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz'
 
-generate_masks = True
-evaluate_masks = False
+generate_masks = False
+evaluate_masks = True
 
-n_cohorts = 3 # from the data, n unique training sets will be created and evaluated independently
+n_cohorts = 4 # from the data, n unique training sets will be created and evaluated independently
 
 
 ##############
@@ -51,8 +51,9 @@ pt_flairs = np.array([os.path.join(training_master, i, 'axFLAIR.nii.gz') for i i
 if generate_masks:
     
     indices = np.arange(0,len(pt_names))
-    training_indices = [i for i in hp.chunk(indices, n_cohorts)] # these are the training indices for a given cohort (roughly equally sized sublists composed of indices, with no repetitions)
-    eval_indices = [[i for i in indices if i not in l] for l in training_indices] # these are the evaluation indices for a given cohort (each sublist is all the indices that are NOT in the corresponding trainign sublist)
+    eval_indices = [i for i in hp.chunk(indices, n_cohorts)] # these are the evaluation indices for a given cohort (roughly equally sized sublists composed of indices, with no repetitions)
+    training_indices = [[i for i in indices if i not in l] for l in eval_indices] # these are the training indices for a given cohort
+    # (each sublist is all the indices that are NOT in the corresponding eval sublist)
     
     mask_master = os.path.join(data_folder, 'generated_masks')
     
