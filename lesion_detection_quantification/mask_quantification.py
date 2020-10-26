@@ -14,7 +14,7 @@ def volumetric_similarity(y_true, y_pred):
     
     diff = abs(true_vol - pred_vol)
     
-    return diff / (true_vol + pred_vol)
+    return 1 - (diff / (true_vol + pred_vol))
     
 
 def quantify_mask_quality(y_true, y_pred):
@@ -53,6 +53,7 @@ def quantify_mask_quality(y_true, y_pred):
     adj_mut_info = metrics.adjusted_mutual_info_score(y_true_f, y_pred_f)
     kappa = metrics.cohen_kappa_score(y_true_f, y_pred_f)
     #roc = metrics.roc_auc_score(y_true, y_pred)
+    median_lv = None
     
     the_dict = {'f1_score': f1,
                 'jaccard_index': jac,
@@ -63,7 +64,8 @@ def quantify_mask_quality(y_true, y_pred):
                 'volumetric_similarity': vol_sim,
                 'adjusted_rand_index': adj_rand,
                 'adjusted_mutual_information': adj_mut_info,
-                'cohens_kappa': kappa}
+                'cohens_kappa': kappa
+                }
     
     # 'area_under_roc_curve': roc
     

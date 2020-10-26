@@ -215,10 +215,182 @@ def generate_knntpp_masks():
     pass
 
 
-def generate_lga_masks():
-    pass
+def generate_lga_masks(training_data, evaluation_data, write_folder, bin_folder):
+    
+        
+    if PROTOTYPING:
+        print(f'\n~~~~~~~~~~~~\nPrototyping is on. n={PROTOTYPING}\n~~~~~~~~~~~~\n')
+        
+    PROB_THRESH = 0.1 # thresholding value for lesion probability maps. Unlike the LPA, the LGA maps are pseudobinary, so a low, standard threshold is okay
+    if PROTOTYPING:
+        kappas = np.arange(0.1,0.5,0.1)
+    else:
+        kappas = np.arange(0.05, 1.05, 0.05) # floating point weirdness
+    kappas = [round(k,2) for k in kappas]
+    alpha_kappas = [str(k) for k in kappas]
+    printed_kappas = '[' + ' '.join(alpha_kappas) + ']'
+    
+    train_names, train_flairs, train_t1s, train_masks = training_data
+    eval_names, eval_flairs, eval_t1s = evaluation_data
+    
+    
+    matlab_alias = "/Applications/MATLAB_R2020b.app/bin/matlab -nodesktop -nosplash -nojvm"
+    
+    if os.path.exists(bin_folder):
+        shutil.rmtree(bin_folder)
+    os.mkdir(bin_folder)
+    
+    if os.path.exists(write_folder):
+        shutil.rmtree(write_folder)
+    os.mkdir(write_folder)
+    
+        
+    training_folder = os.path.join(bin_folder, 'training')
+    os.mkdir(training_folder)
+    
+    # step 1: determine the ideal kappa value
+    unpacked_flairs = []
+    unpacked_t1s = []
+    used_train_masks = []
+    used_names = []
+    print('Generating training lesion masks')
+    for i, (name, flair, t1, mask) in enumerate(zip(train_names, train_flairs, train_t1s, train_masks)):
+        pt_folder = os.path.join(training_folder, name)
+        os.mkdir(pt_folder)
+        
+        # first step is unzip the T1 and flair, move them to the pt_folder and then run LGA
+        
+        unzipped_flair = flair[:-3]
+        unzipped_flair_base = os.path.basename(os.path.normpath(unzipped_flair))
+        unzipped_flair_target = os.path.join(pt_folder, unzipped_flair_base)
+        
+        gunzip_shutil(flair, unzipped_flair)
+        shutil.move(unzipped_flair, unzipped_flair_target)
+        
+        unzipped_t1 = t1[:-3]
+        unzipped_t1_base = os.path.basename(os.path.normpath(unzipped_t1))
+        unzipped_t1_target = os.path.join(pt_folder, unzipped_t1_base)
+        
+        gunzip_shutil(t1, unzipped_t1)
+        shutil.move(unzipped_t1, unzipped_t1_target)
+        
+        matlab_call = f'''{matlab_alias} -nodisplay -r "sky_ps_LST_lga('{unzipped_t1_target}', '{unzipped_flair_target}', {printed_kappas})"'''
+        print(f'MATLAB CALL IS:\n{matlab_call}')
+        os.system(matlab_call) # need to use interactive version of zsh, not the older default sh
+        
+        unpacked_flairs.append(unzipped_flair_target)
+        unpacked_t1s.append(unzipped_t1_target)
+        
+        used_train_masks.append(mask)
+        used_names.append(name)
+        
+        if PROTOTYPING:
+            if i >= PROTOTYPING: # for speeding up prototyping
+                break
+            
+    # still step 1, but a different loop! weehoo!
+    print('Determining optimal kappa')
+    all_dices = []
+    all_kaps = []
+    for i, (name, mask) in enumerate(zip(used_names, used_train_masks)):
+        print(f'for pt {name}')
+        pt_folder = os.path.join(training_folder, name)
+        globber = os.path.join(pt_folder, 'flairspace_map_*.nii')
+        globbed = glob(globber)
+        
+        kaps = []
+        dices = []
+        true_mask = nib.load(mask).get_fdata()            
+        y_true_f = true_mask.flatten()
+        for f in globbed:
+            base = os.path.basename(os.path.normpath(f))
+            b = base[:-4]
+            kap = float(b.split('flairspace_map_')[1])
+            
+            prob_mask = nib.load(f).get_fdata()
 
+            bin_mask = prob_mask >= PROB_THRESH
+            y_pred_f = bin_mask.flatten()
+            dice = metrics.f1_score(y_true_f, y_pred_f)
+            dices.append(dice)
+            kaps.append(kap)
+            
+        zipped_lists = zip(kaps, dices)
+        sorted_pairs = sorted(zipped_lists)
+        
+        tuples = zip(*sorted_pairs)
+        kaps, dices = [list(tuple) for tuple in  tuples]
+        
+        all_dices.append(np.array(dices))
+        all_kaps.append(kaps)
+        
+    all_dices = np.array(all_dices)
+    flat_kaps = all_kaps[0]
+    means = all_dices.mean(0)
+    amax = np.argmax(means)
+    winning_kappa = flat_kaps[amax]
+    print(f'\nOptimal kappa is {round(winning_kappa,2)}\n')
+    
+    plt.figure()
+    for row in all_dices:
+        plt.plot(flat_kaps, row, color='black', alpha=0.2)
+    plt.plot(flat_kaps, means, color='red')
+    plt.xlabel('Kappa')
+    plt.ylabel('Dice coefficient')
+    plt.xlim(0,1)
+    plt.title(f'Effect of kappa on cohort lesion mask quality\nOptimal kappa: {round(winning_kappa,2)}\n(thresholding set at {PROB_THRESH})')
+    
+    figname = os.path.join(bin_folder, 'kappa_plot.png')
+    plt.savefig(figname)
+    
+    
+    # step 2: create prob masks for the evaluation data and write the binarized masks
+    print('Generating and thresholding evaluation masks')
+    eval_folder = os.path.join(bin_folder, 'eval')
+    os.mkdir(eval_folder)
+    for i, (name, flair) in enumerate(zip(eval_names, eval_flairs)):
+        print(f'\n{name} ({i+1} of {len(eval_names)})')
 
+        pt_folder_eval = os.path.join(eval_folder, name)
+        os.mkdir(pt_folder_eval)
+        
+        unzipped_flair = flair[:-3]
+        unzipped_flair_base = os.path.basename(os.path.normpath(unzipped_flair))
+        unzipped_flair_target = os.path.join(pt_folder_eval, unzipped_flair_base)
+        
+        gunzip_shutil(flair, unzipped_flair)
+        shutil.move(unzipped_flair, unzipped_flair_target)
+        
+        unzipped_t1 = t1[:-3]
+        unzipped_t1_base = os.path.basename(os.path.normpath(unzipped_t1))
+        unzipped_t1_target = os.path.join(pt_folder_eval, unzipped_t1_base)
+        
+        gunzip_shutil(t1, unzipped_t1)
+        shutil.move(unzipped_t1, unzipped_t1_target)
+        
+        matlab_call = f'''{matlab_alias} -nodisplay -r "sky_ps_LST_lga('{unzipped_t1_target}', '{unzipped_flair_target}', {winning_kappa})"'''
+        print(f'MATLAB CALL IS:\n{matlab_call}')
+        os.system(matlab_call) # need to use interactive version of zsh, not the older default sh
+        
+        prob_mask = os.path.join(pt_folder_eval, f'flairspace_map_{round(winning_kappa,2)}.nii')
+        
+        print('Thresholding mask')
+        pmask = nib.load(prob_mask)
+        fdata = pmask.get_fdata()
+        
+        bin_mask = (fdata >= PROB_THRESH).astype(int)
+        bin_mask_name = os.path.join(write_folder, f'{name}.nii.gz')
+        
+        out = nib.Nifti1Image(bin_mask, pmask.affine, pmask.header)
+        nib.save(out, bin_mask_name)
+
+        if PROTOTYPING:
+            if i >= PROTOTYPING: # for speeding up prototyping
+                break 
+        
+            
+    
+    
 def generate_lpa_masks(training_data, evaluation_data, write_folder, bin_folder, model_type):
     """
     
@@ -281,11 +453,7 @@ def generate_lpa_masks(training_data, evaluation_data, write_folder, bin_folder,
         os.mkdir(pt_folder)
         
         # first step is unzip the FLAIR, move it to the pt_folder and then run LPA
-        """
-        f = gzip.open(flair, 'rb')
-        file_content = f.read()
-        f.close()
-        """
+
         
         unzipped_flair = flair[:-3]
         unzipped_flair_base = os.path.basename(os.path.normpath(unzipped_flair))

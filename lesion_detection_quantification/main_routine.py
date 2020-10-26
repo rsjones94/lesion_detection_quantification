@@ -5,6 +5,9 @@ import shutil
 import numpy as np
 import pandas as pd
 import nibabel as nib
+import matplotlib.pyplot as plt
+from skimage import measure
+from sklearn import neighbors
 
 import mask_quantification as mq
 import mask_generation as mg
@@ -29,9 +32,11 @@ data_folder = '/Users/skyjones/Documents/lesion_detection_quantification_data/'
 mni_reference_scan = '/usr/local/fsl/data/standard/MNI152_T1_1mm_brain.nii.gz'
 
 generate_masks = False
-evaluate_masks = True
+evaluate_masks = False
+generate_figures = True
 
-n_cohorts = 4 # from the data, n unique training sets will be created and evaluated independently
+n_repeats = 3 # not implemented. number of times to randomly reassort the samples
+n_cohorts = 4 # from the data, n unique evaluation cohorts per repetition will be created
 
 
 ##############
@@ -47,6 +52,7 @@ pt_goldens = np.array([os.path.join(training_master, i, 'axFLAIR_mask.nii.gz') f
 pt_t1s = np.array([os.path.join(training_master, i, 'axT1.nii.gz') for i in pt_names])
 pt_flairs = np.array([os.path.join(training_master, i, 'axFLAIR.nii.gz') for i in pt_names])
 
+evaluation_folder = os.path.join(data_folder, 'quality_quantification')
 
 if generate_masks:
     
@@ -85,30 +91,29 @@ if generate_masks:
             shutil.rmtree(cohort_bin_folder)
         os.mkdir(cohort_bin_folder)
         
-        
-        """     
-        bianca_write_folder = os.path.join(cohort_folder, 'bianca')
-        bianca_bin_folder = os.path.join(cohort_bin_folder, 'bianca')
-        print('Generating BIANCA masks')
-        mg.generate_bianca_masks(training_data, evaluation_data, bianca_write_folder, bianca_bin_folder, mni_reference_scan)
-        """
-        
-        # mg.generate_knntpp_masks() # not implemented
-        # mg.generate_default_lga_masks() # not implemented
+        lga_write_folder = os.path.join(cohort_folder, 'lga')
+        lga_bin_folder = os.path.join(cohort_bin_folder, 'lga')
+        print('\n\n\nGenerating standard LPA masks')
+        mg.generate_lga_masks(training_data, evaluation_data, lga_write_folder, lga_bin_folder) # not implemented
         
         standard_lpa_write_folder = os.path.join(cohort_folder, 'lpa_standard')
         standard_lpa_bin_folder = os.path.join(cohort_bin_folder, 'lpa_standard')
-        print('Generating standard LPA masks')
+        print('\n\n\nGenerating standard LPA masks')
         mg.generate_lpa_masks(training_data, evaluation_data, standard_lpa_write_folder, standard_lpa_bin_folder, model_type='default')
+          
+        bianca_write_folder = os.path.join(cohort_folder, 'bianca')
+        bianca_bin_folder = os.path.join(cohort_bin_folder, 'bianca')
+        print('\n\n\nGenerating BIANCA masks')
+        mg.generate_bianca_masks(training_data, evaluation_data, bianca_write_folder, bianca_bin_folder, mni_reference_scan)
         
+        # mg.generate_knntpp_masks() # not implemented
+
         
-        # mg.generate_custom_lga_masks() # not implemented
-        # mg.generate_custom_lpa_masks() # not implemented
     
     
 if evaluate_masks:
     
-    evaluation_folder = os.path.join(data_folder, 'quality_quantification')
+
     
     cohort_folders = glob(os.path.join(data_folder, 'generated_masks', '*/'))
     cohorts = [os.path.basename((os.path.normpath(i))) for i in cohort_folders]
@@ -142,9 +147,30 @@ if evaluate_masks:
                 print(f'Generating metrics for {pt_name}')
                 
                 mask_data = nib.load(mask).get_fdata()
-                golden_data = nib.load(golden_standard).get_fdata()
+                
+                golden_nii = nib.load(golden_standard)
+                golden_data = golden_nii.get_fdata()
+                
+                
+                
+                # get lesion volume data
+                voxel_dims = golden_nii.header['pixdim'][1:4]
+                voxel_vol = np.product(voxel_dims)
+                labeled_lesions = measure.label(golden_data)
+                vols = measure.regionprops_table(labeled_lesions, properties=['area'])['area'] * voxel_vol
+                # yes the property is area, but it's 3d so it's actually volume. units are mm3
+                
+                mean_vol = vols.mean()
+                median_vol = np.median(vols)
+                total_vol = vols.sum()
                 
                 stats_dict = mq.quantify_mask_quality(golden_data, mask_data)
+                stats_dict['mean_vol'] = mean_vol
+                stats_dict['median_vol'] = median_vol
+                stats_dict['total_vol'] = total_vol
+                
+
+                
                 the_order = ['pt']
                 the_order.extend(stats_dict.keys())
                 stats_dict['pt'] = pt_name
@@ -158,8 +184,8 @@ if evaluate_masks:
             try:
                 metrics_reference[protocol_name].append(stats_df)
             except KeyError:
-                metrics_reference[protocol_name] = []
-    
+                metrics_reference[protocol_name] = [stats_df]
+                
     average_folder = os.path.join(evaluation_folder, 'average')
     if os.path.exists(average_folder):
         shutil.rmtree(average_folder)
@@ -170,18 +196,88 @@ if evaluate_masks:
         
         csv_name = os.path.join(average_folder, f'{key}.csv')
         mean_df.to_csv(csv_name)
-                
-                
         
+if generate_figures:
+    average_folder = os.path.join(evaluation_folder, 'average')
+    figure_folder = os.path.join(data_folder, 'figures')
+    result_csvs = os.listdir(average_folder)
+    
+    meanified_csv_name = os.path.join(figure_folder, 'master_comp.csv')
+    meanified_df = pd.DataFrame()
+    
+    master_df = pd.DataFrame()
+    
+    for csv in result_csvs:
+        the_csv = os.path.join(average_folder, csv)
+        the_name = csv[:-4]
+        result_df = pd.read_csv(the_csv, index_col='pt')
+        result_df = result_df.drop(result_df.columns[0], axis=1)
+        result_df['method'] = the_name
         
+        master_df = master_df.append(result_df)
         
+        meanified = result_df.mean()
+        meanified['method'] = the_name
+        meanified_df = meanified_df.append(meanified, ignore_index=True)
         
+    meanified_df = meanified_df.set_index('method')
+    meanified_df.to_csv(meanified_csv_name)
+    
+    
+    methods = list(master_df['method'].unique())
+    
+    n_subs  = len(master_df.columns) - 1 # -1 to account for the fact that one of the cols is 'method'
+    edges = [0,0]
+    
+    flipper = 1
+    while edges[0] * edges[1] < n_subs:
+        edges[flipper] += 1
+        flipper ^= 1
         
+    edge_x, edge_y = edges
+    fig, axs = plt.subplots(nrows=edge_x, ncols=edge_y, figsize=(14,20))
+    
+    the_cols = list(master_df.columns.drop('method'))
+    
+    for i, ax in enumerate(fig.axes):
+        try:
+            c = the_cols[i]
+        except IndexError:
+            print('out of index!!')
+            ax.set_visible(False)
+            continue
+        print(f'Boxplot for {c}')
+        #master_df.boxplot(c, 'method')
+        method_data = [master_df[master_df['method']==met][c].dropna() for met in methods]
         
-        
-        
-        
-        
+        ax.boxplot(method_data)
+        ax.set_xticklabels(methods)
+        ax.set_title(f'{c}')
+        ax.set_ylim(-.1,1.1)
+    plt.tight_layout()
+    
+    master_fig_name = os.path.join(figure_folder, 'boxes.png')
+    plt.savefig(master_fig_name)
+    #plt.close('all')
+    
+    # plotting against volume
+    for vol_type in ['median_vol', 'mean_vol', 'total_vol']:
+        plt.figure()
+        plot_name = os.path.join(figure_folder, f'methods_against_{vol_type}.png')
+        for m in methods:
+            
+            sub_df = master_df[master_df['method'] == m]
+            exes = sub_df[vol_type]
+            whys = sub_df['f1_score']
+            
+            plt.scatter(exes, whys, label=m)
+            
+        plt.title('Segmentation quality as a function of {vol_type}')
+        plt.xlabel(f'{vol_type} (cubic mm)')
+        plt.ylabel('F1-score')
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(plot_name)
         
         
         
