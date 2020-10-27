@@ -193,3 +193,41 @@ def execute_bianca(master, model, subject_index, skullstrip_col, transformation_
     cmd = f'bianca --singlefile={master} --querysubjectnum={subject_index} --brainmaskfeaturenum={skullstrip_col} --matfeaturenum={transformation_col} --spatialweight=1 --loadclassifierdata={model} -o {outname}'
     print(f'BIANCA execution: {cmd}')
     os.system(cmd)
+    
+    
+def filter_zeroed_axial_slices(nii_data, thresh=0.99):
+    # removes slices if the number of pixels that are lesser than or equal to 0 exceeds a % threshold, and replaces NaN with -1
+    the_data = nii_data.copy()
+    wherenan = np.isnan(the_data)
+    the_data[wherenan] = -1
+    
+    if thresh:
+        keep = []
+        for i in range(the_data.shape[2]):
+            d = the_data[:,:,i]
+            
+            near_zero = np.isclose(d,0)
+            less_zero = (d <= 0)
+            
+            bad_pixels = np.logical_or(near_zero, less_zero)
+            
+            perc_bad = bad_pixels.sum() / d.size
+            
+            if not perc_bad >= thresh:
+                keep.append(True)
+            else:
+                keep.append(False)
+        
+        new = the_data[:,:,keep]
+        return new, keep
+    else:
+        return the_data, list(np.arange(0, nii_data.shape[2]))
+
+
+
+
+
+
+
+
+

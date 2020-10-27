@@ -8,6 +8,8 @@ import nibabel as nib
 import matplotlib.pyplot as plt
 from skimage import measure
 from sklearn import neighbors
+import matplotlib.cm as cm
+from scipy import ndimage
 
 import mask_quantification as mq
 import mask_generation as mg
@@ -157,12 +159,15 @@ if evaluate_masks:
                 voxel_dims = golden_nii.header['pixdim'][1:4]
                 voxel_vol = np.product(voxel_dims)
                 labeled_lesions = measure.label(golden_data)
-                vols = measure.regionprops_table(labeled_lesions, properties=['area'])['area'] * voxel_vol
-                # yes the property is area, but it's 3d so it's actually volume. units are mm3
-                
-                mean_vol = vols.mean()
-                median_vol = np.median(vols)
-                total_vol = vols.sum()
+                try:
+                    vols = measure.regionprops_table(labeled_lesions, properties=['area'])['area'] * voxel_vol
+                    # yes the property is area, but it's 3d so it's actually volume. units are mm3
+                    mean_vol = vols.mean()
+                    median_vol = np.median(vols)
+                    total_vol = vols.sum()
+                except IndexError:
+                    mean_vol = median_vol = total_vol = 0
+                    
                 
                 stats_dict = mq.quantify_mask_quality(golden_data, mask_data)
                 stats_dict['mean_vol'] = mean_vol
@@ -225,19 +230,19 @@ if generate_figures:
     
     
     methods = list(master_df['method'].unique())
+
     
-    n_subs  = len(master_df.columns) - 1 # -1 to account for the fact that one of the cols is 'method'
+    the_cols = list(master_df.columns.drop(['method', 'mean_vol', 'median_vol', 'total_vol']))
+    
+    n_subs  = len(the_cols)
     edges = [0,0]
     
     flipper = 1
     while edges[0] * edges[1] < n_subs:
         edges[flipper] += 1
         flipper ^= 1
-        
     edge_x, edge_y = edges
     fig, axs = plt.subplots(nrows=edge_x, ncols=edge_y, figsize=(14,20))
-    
-    the_cols = list(master_df.columns.drop('method'))
     
     for i, ax in enumerate(fig.axes):
         try:
@@ -263,6 +268,7 @@ if generate_figures:
     # plotting against volume
     for vol_type in ['median_vol', 'mean_vol', 'total_vol']:
         plt.figure()
+        #plt.xscale('log')
         plot_name = os.path.join(figure_folder, f'methods_against_{vol_type}.png')
         for m in methods:
             
@@ -272,16 +278,88 @@ if generate_figures:
             
             plt.scatter(exes, whys, label=m)
             
-        plt.title('Segmentation quality as a function of {vol_type}')
-        plt.xlabel(f'{vol_type} (cubic mm)')
+        plt.title(f'Segmentation quality as a function of {vol_type}')
+        plt.xlabel('Volume (cubic mm)')
         plt.ylabel('F1-score')
         plt.legend()
         plt.tight_layout()
+        plt.show()
         plt.savefig(plot_name)
         
+    
+    # now generate our comparison maps
+    plt.style.use('dark_background')
+    
+    cohort_folders = glob(os.path.join(data_folder, 'generated_masks', '*/'))
+    cohorts = [os.path.basename((os.path.normpath(i))) for i in cohort_folders]
+    
+    for cohort_name, cohort_folder in zip(cohorts, cohort_folders):
+        figure_cohort_folder = os.path.join(figure_folder, cohort_name)
+        if os.path.exists(figure_cohort_folder):
+            shutil.rmtree(figure_cohort_folder)
+        os.mkdir(figure_cohort_folder)
+
+        protocol_folders = glob(os.path.join(cohort_folder, '*/'))
+        protocol_names = [os.path.basename((os.path.normpath(i))) for i in protocol_folders]
+        
+        masks = glob(os.path.join(protocol_folders[0], '*.nii.gz'))
+        masks = [os.path.basename(os.path.normpath(m)) for m in masks]
         
         
-        
+        n_slices_to_show = 9
+        middy = (n_slices_to_show-1)/2
+        for mask in masks:
+            pt_name = os.path.basename(os.path.normpath(mask)).split('.')[0]
+            print(f'Generating comparison map for {pt_name}')
+            
+            flair_name = golden_standard = os.path.join(data_folder, 'lesion_training_data', pt_name, 'axFLAIR.nii.gz')
+            
+            golden_standard = os.path.join(data_folder, 'lesion_training_data', pt_name, 'axFLAIR_mask.nii.gz')
+            method_segmentations = [os.path.join(p, f'{pt_name}.nii.gz') for p in protocol_folders]
+            
+            maps = [None, golden_standard]
+            map_names = ['FLAIR', 'golden_standard']
+            
+            maps.extend(method_segmentations)
+            map_names.extend(protocol_names)
+            
+            comp_map_name = os.path.join(figure_cohort_folder, f'{pt_name}_comp_map.png')
+            n_methods = len(protocol_names)
+            
+            flair_data = nib.load(flair_name).get_fdata()
+            filt_flair, keepers = hp.filter_zeroed_axial_slices(flair_data)
+            
+            n_slices_to_remove = 8 # n slices to remove from top and bottom of viewbox (to reduce number of cerebellum and super high slices)
+            idx = np.round(np.linspace(0 + n_slices_to_remove, filt_flair.shape[2] - 1 - n_slices_to_remove, n_slices_to_show)).astype(int)
+            
+            fig, axs = plt.subplots(nrows=n_methods+2, ncols=n_slices_to_show, figsize=(n_slices_to_show*2,n_slices_to_show*10))
+            ind = 0
+            for i, (mapped, map_name, axrow) in enumerate(zip(maps, map_names, axs)):
+                print(f'({map_name})')
+                if mapped is not None:
+                    mapped_data = nib.load(mapped).get_fdata()
+                    filt_mapped = mapped_data[:,:,keepers]
+                for j, (ind, ax) in enumerate(zip(idx, axrow)):
+                    my_cmap = cm.bwr
+                    my_cmap.set_under('k', alpha=0)
+                    
+                    flair_slice = np.fliplr(ndimage.rotate(filt_flair[:,:,ind].T, 180))
+                    
+                    ax.imshow(flair_slice, cmap='gray')
+                    
+                    if mapped is not None:
+                        map_slice = np.fliplr(ndimage.rotate(filt_mapped[:,:,ind].T, 180)) > 0.1
+                        ax.imshow(map_slice, cmap=my_cmap, clim=[0.01, 1], interpolation='none')
+                    ax.axis('off')
+                    if j == middy:
+                        ax.set_title(map_name)
+                    
+                    #i += 1
+            
+            plt.tight_layout()
+            plt.savefig(comp_map_name)
+            
+                
         
     
     
