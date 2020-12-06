@@ -93,10 +93,11 @@ if generate_masks:
             shutil.rmtree(cohort_bin_folder)
         os.mkdir(cohort_bin_folder)
         
+        """
         lga_write_folder = os.path.join(cohort_folder, 'lga')
         lga_bin_folder = os.path.join(cohort_bin_folder, 'lga')
         print('\n\n\nGenerating standard LPA masks')
-        mg.generate_lga_masks(training_data, evaluation_data, lga_write_folder, lga_bin_folder) # not implemented
+        mg.generate_lga_masks(training_data, evaluation_data, lga_write_folder, lga_bin_folder)
         
         standard_lpa_write_folder = os.path.join(cohort_folder, 'lpa_standard')
         standard_lpa_bin_folder = os.path.join(cohort_bin_folder, 'lpa_standard')
@@ -107,8 +108,12 @@ if generate_masks:
         bianca_bin_folder = os.path.join(cohort_bin_folder, 'bianca')
         print('\n\n\nGenerating BIANCA masks')
         mg.generate_bianca_masks(training_data, evaluation_data, bianca_write_folder, bianca_bin_folder, mni_reference_scan)
+        """
         
-        # mg.generate_knntpp_masks() # not implemented
+        ubo_write_folder = os.path.join(cohort_folder, 'ubo')
+        ubo_bin_folder = os.path.join(cohort_bin_folder, 'ubo')
+        print('\n\n\nGenerating UBO Detector masks')
+        mg.generate_ubodetector_masks(training_data, evaluation_data, bianca_write_folder, bianca_bin_folder)
 
         
     

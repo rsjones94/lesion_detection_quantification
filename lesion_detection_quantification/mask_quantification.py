@@ -53,7 +53,6 @@ def quantify_mask_quality(y_true, y_pred):
     adj_mut_info = metrics.adjusted_mutual_info_score(y_true_f, y_pred_f)
     kappa = metrics.cohen_kappa_score(y_true_f, y_pred_f)
     #roc = metrics.roc_auc_score(y_true, y_pred)
-    median_lv = None
     
     the_dict = {'f1_score': f1,
                 'jaccard_index': jac,
